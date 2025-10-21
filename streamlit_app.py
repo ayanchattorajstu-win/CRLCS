@@ -334,7 +334,7 @@ with st.spinner("Computing SHAP values..."):
     shap_values = explainer.shap_values(X)
 shap_positive = shap_values[1] if isinstance(shap_values, list) else shap_values
 
-# Global Beeswarm (UX: Interactive Plotly conversion)
+    # Global Beeswarm (UX: Interactive Plotly conversion)
     st.subheader("Global Feature Importance (Beeswarm)")
     shap.summary_plot(shap_positive, X, feature_names=feature_names, show=False)
     st.pyplot(plt.gcf())
