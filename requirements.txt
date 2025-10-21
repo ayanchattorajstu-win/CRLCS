@@ -1,20 +1,22 @@
-# Core Streamlit Application and Data Science Libraries
-streamlit==1.38.0
-pandas==2.2.2
-numpy==1.26.4
-scikit-learn==1.5.1
-joblib==1.4.2
-matplotlib==3.9.2
-seaborn==0.13.2
-requests==2.32.3
-plotly==5.22.0
-folium==0.17.0
+# --- FINAL, CLEANED, COMPATIBLE REQUIREMENTS.TXT ---
 
-# AI/ML Specific Libraries (Versioned for Stability)
-xgboost==2.1.1
-imbalanced-learn==0.12.4
-shap==0.47.0
-google-generativeai==0.8.3
+# Streamlit Application and Core Libraries
+streamlit
+pandas
+numpy  # REMOVED: ==1.26.4 constraint to allow upgrade to compatible 2.x
+scikit-learn
+joblib
+matplotlib
+seaborn
+requests
+plotly
+folium
 
-# Deep Learning (Allow Python 3.10 to find the latest compatible version)
+# AI/ML Specific Libraries (Allowing for flexible minor version resolution)
+xgboost
+imbalanced-learn
+shap
+google-generativeai
+
+# Deep Learning (CRITICAL: Allow Python 3.10 to find the working version)
 tensorflow
