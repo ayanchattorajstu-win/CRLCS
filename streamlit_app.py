@@ -484,65 +484,58 @@ elif page == "Thermal Simulation (Cool-Cocoon)":
         sim_hours = st.slider("Sim Duration (Hours)", 4, 8, 6)
 
     # Run Sim (From Notebook, UX-Optimized)
-    TIME_STEPS = int(sim_hours * 60) + 1
-    time_array_min = np.linspace(0, sim_hours * 60, TIME_STEPS)
-    # CRITICAL FIX: Set initial temp just ABOVE the melting point for immediate PCM activation
-    T_INITIAL = 32.5 
+    TIME_STEPS = sim_hours * 60 + 1
+    time_array = np.linspace(0, sim_hours, TIME_STEPS)  # Time in hours
+    T_INITIAL = 37.0 
     # Final Param Fixes
-    MASS_BODY, CP_BODY, AREA, H_COEFF = 10.0, 4.18, 1.0, 0.0475
+    MASS_BODY, CP_BODY, AREA, H_COEFF = 10.0, 4.18, 1.0, 0.05
     T_MELT, LF_PCM = 32.0, 230
     
+    METABOLIC_RATE_KJ_PER_MIN = (metabolic_rate * AREA) * (60 / 1000)
     max_energy_to_melt = mass_pcm * LF_PCM
     T_NO_PCM = np.full(TIME_STEPS, T_INITIAL)
     T_WITH_PCM = np.full(TIME_STEPS, T_INITIAL)
     total_energy_absorbed = 0.0
     for i in range(1, TIME_STEPS):
-        dt = time_array_min[i] - time_array_min[i-1]  # dt in minutes
+        dt_min = time_array[i] - time_array[i-1]
         # No PCM
         T_prev_no = T_NO_PCM[i-1]
-        power_conv_no = H_COEFF * AREA * (t_ambient - T_prev_no)
-        Q_conv_no_kJ = power_conv_no * (dt * 60) / 1000  # W * s / 1000 = kJ
-        Q_met_kJ = metabolic_rate * (dt * 60) / 1000  # W * s / 1000 = kJ
-        Q_in_no_kJ = Q_conv_no_kJ + Q_met_kJ
-        dT_no = Q_in_no_kJ / (MASS_BODY * CP_BODY)
+        Q_in_no = (H_COEFF * AREA * (t_ambient - T_prev_no) * dt_min) + (METABOLIC_RATE_KJ_PER_MIN * dt_min)
+        dT_no = Q_in_no / (MASS_BODY * CP_BODY)
         T_NO_PCM[i] = T_prev_no + dT_no
         # With PCM
         T_prev_pcm = T_WITH_PCM[i-1]
-        power_conv_pcm = H_COEFF * AREA * (t_ambient - T_prev_pcm)
-        Q_conv_pcm_kJ = power_conv_pcm * (dt * 60) / 1000
-        Q_met_kJ = metabolic_rate * (dt * 60) / 1000  # Reuse
-        Q_in_pcm_kJ = Q_conv_pcm_kJ + Q_met_kJ
+        Q_in_pcm = (H_COEFF * AREA * (t_ambient - T_prev_pcm) * dt_min) + (METABOLIC_RATE_KJ_PER_MIN * dt_min)
         if T_prev_pcm >= T_MELT and total_energy_absorbed < max_energy_to_melt:
-            remaining = max_energy_to_melt - total_energy_absorbed
-            Q_latent = min(Q_in_pcm_kJ, remaining)
-            total_energy_absorbed += Q_latent
-            excess = Q_in_pcm_kJ - Q_latent
-            dT_sensible = excess / (MASS_BODY * CP_BODY)
-            T_WITH_PCM[i] = T_MELT + dT_sensible
+            Q_latent_absorbed = min(Q_in_pcm, max_energy_to_melt - total_energy_absorbed)
+            total_energy_absorbed += Q_latent_absorbed
+            T_WITH_PCM[i] = T_MELT
         else:
-            dT_sensible = Q_in_pcm_kJ / (MASS_BODY * CP_BODY)
+            dT_sensible = Q_in_pcm / (MASS_BODY * CP_BODY)
             T_WITH_PCM[i] = T_prev_pcm + dT_sensible
-    # Plot (convert time_array_min back to hours for x-axis)
-    time_array_hr = time_array_min / 60
+    # Plot
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(time_array_hr, T_NO_PCM, 'r-', label='No PCM (Unprotected)', linewidth=3)
-    ax.plot(time_array_hr, T_WITH_PCM, 'b-', label='Cool-Cocoon (PCM-Cooled)', linewidth=3)
-    # Fixed melt_time calculation
-    above_threshold = T_WITH_PCM > T_MELT + 0.01
-    slice_argmax = np.argmax(above_threshold[1:])
-    rise_idx = slice_argmax + 1
-    if len(above_threshold) > rise_idx and above_threshold[rise_idx]:
-        melt_time = time_array_hr[rise_idx]
-    else:
-        melt_time = sim_hours
-    ax.axvspan(0, melt_time, color='green', alpha=0.1, label=f'Cooling Plateau: {melt_time:.1f} hrs')
-    ax.axhline(T_MELT, color='gray', linestyle='--', label=f'PCM Melt Temp ({T_MELT}°C)')
-    ax.set_title('Interactive Cool-Cocoon Thermal Simulation')
-    ax.set_xlabel('Time (Hours)')
-    ax.set_ylabel('Microclimate Temperature (°C)')
-    ax.legend()
+    ax.plot(time_array, T_NO_PCM, 'r-', label='No PCM Cooling (Unprotected)', linewidth=3)
+    ax.plot(time_array, T_WITH_PCM, 'b-', label='Cool-Cocoon (PCM-Cooled)', linewidth=3)
+    # Find the exact moment the plateau ends (for visualization clarity)
+    melt_time_index = np.argmax(T_WITH_PCM > T_MELT + 0.01)
+    melt_time = time_array[melt_time_index] if melt_time_index > 0 else sim_hours
+    ax.axvspan(0, melt_time, color='green', alpha=0.1, label=f'PCM Sustained Cooling: {melt_time:.2f} Hours')
+    ax.axhline(T_MELT, color='gray', linestyle='--', linewidth=1, label=f'PCM Activation Temp ({T_MELT}°C)')
+    ax.set_title('Simulated Thermal Performance: Cool-Cocoon Bio-Thermal Model', fontsize=14)
+    ax.set_xlabel('Time (Hours)', fontsize=12)
+    ax.set_ylabel('Body Section Temperature (°C)', fontsize=12)
+    ax.legend(loc='upper left')
+    ax.grid(True)
     st.pyplot(fig)
-    st.info(f"**Key Result**: Cooling sustains for {melt_time:.1f} hours below stress threshold.")
+    dt_approx = time_array[1] - time_array[0]
+    st.markdown(f"""
+    --- Bio-Thermal Simulation Results ---
+    PCM Total Mass: {mass_pcm*1000:.0f}g
+    Metabolic Heat Rate (Internal): {METABOLIC_RATE_KJ_PER_MIN / dt_approx:.2f} kJ/min
+    Latent Heat Capacity: {max_energy_to_melt:.0f} kJ
+    Simulated Cooling Duration (Plateau End): {melt_time:.2f} hours
+    """)
 
 elif page == "Policy Memo":
     st.header("8. AI-Generated Policy Memo (Gemini-Powered)")
@@ -573,7 +566,7 @@ elif page == "Policy Memo":
         genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel('gemini-2.5-flash')
         # Enhanced Prompt (From Notebook, UX: Editable)
-        default_prompt = """Draft a persuasive policy memo titled "Maximizing Learning Continuity: A Proposal for the Heat-Resilient Education System." Use metrics: AUC 0.85, Recall 0.72, F1 0.65. Top drivers: heat_index_roll3, drought_risk_roll3. Impact: 8 days saved/year. Audience: Bihar/UP Education Secretaries."""
+        default_prompt = """Draft a persuasive policy memo titled "Maximizing Learning Continuity: A Proposal for the Heat-Resilient Education System." Use metrics: AUC 0.85, Recall 0.72, F1 0.65. Top drivers: heat_index_roll3, drought_risk_roll3. Impact: 8 days saved/year. Include Cool-Cocoon, a micro-climate vest made from bio-PCM material, as recommended intervention. Audience: Bihar/UP Education Secretaries."""
         
         prompt = st.text_area("Edit Prompt", default_prompt, height=100)
         
