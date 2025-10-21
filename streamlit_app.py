@@ -566,7 +566,7 @@ elif page == "Policy Memo":
 
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         # Enhanced Prompt (From Notebook, UX: Editable)
         default_prompt = """Draft a persuasive policy memo titled "Maximizing Learning Continuity: A Proposal for the Heat-Resilient Education System." Use metrics: AUC 0.85, Recall 0.72, F1 0.65. Top drivers: heat_index_roll3, drought_risk_roll3. Impact: 8 days saved/year. Audience: Bihar/UP Education Secretaries."""
         
