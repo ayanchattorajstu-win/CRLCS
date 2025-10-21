@@ -328,16 +328,6 @@ elif page == "Model Loading & Eval":
     with st.expander("Advanced: LSTM Stacking Details"):
         st.info("PKL includes stacking if enabled in notebook. Recall: 72% catches high-impact events.")
 
-elif page == "Interpretability (SHAP)":
-    # This block is structurally correct and maintains consistency after the previous debugging round.
-    # It will rely on the successful initialization of the TreeExplainer, even if the result is only partial
-    # due to the model serialization issue.
-    # The actual Python interpreter will execute this block, ignoring the indentation error if the file
-    # structure is now correct.
-    st.header("4. SHAP Interpretability (Instant on Loaded Model)")
-    st.error("SHAP has been temporarily disabled due to cross-environment serialization issues. Please refer to the Technical Appendix for SHAP analysis.")
-
-
 elif page == "Back-Test & Live Predictions":
     st.header("5. Back-Test & Live Predictions (Model Instant)")
     if pipeline is None or 'df_daily' not in st.session_state:
@@ -398,18 +388,23 @@ elif page == "Back-Test & Live Predictions":
                     if 'prob' in col or 'risk' in col or 'lstm' in col:
                         recent_hist[col] = 0.5
                     elif col in ['date']:
-                        recent_hist[col] = recent_hist[col].iloc[-1] # Use last valid date
+                        # Use last valid date (CRITICAL: needs to be a Pandas Timestamp for merge)
+                        recent_hist[col] = recent_hist['date'].iloc[-1]
                     elif col in ['district']:
-                         recent_hist[col] = recent_hist[col].iloc[-1]
+                         recent_hist[col] = recent_hist['district'].iloc[-1]
                     else:
                         recent_hist[col] = 0.0
             # --------------------------------------------------
             
             # Aggregate forecast to daily (mock engineering for demo)
-            live_daily = forecast_df.groupby(['district', forecast_df['datetime'].dt.date]).agg({
-                'temp': 'mean', 'precip_prob': 'max', 'precip_sum_daily': 'first'
-            }).reset_index().rename(columns={forecast_df['datetime'].dt.date.name: 'date'})
+            date_series = forecast_df['datetime'].dt.date
+            live_daily = forecast_df.groupby(['district', date_series]).agg({
+                'temp': 'mean', 'humidity': 'mean', 'precip_prob': 'max', 'precip_sum_daily': 'first'
+            }).reset_index()
+            # FIX: Explicitly rename the unnamed date column
+            live_daily.columns = ['district', 'date', 'temp', 'humidity', 'precip_prob', 'precip_sum_daily']
             live_daily['date'] = pd.to_datetime(live_daily['date'])
+            
             # Fill statics from risk_base & recent
             for dist in districts:
                 mask = live_daily['district'] == dist
@@ -420,157 +415,13 @@ elif page == "Back-Test & Live Predictions":
                 live_daily.loc[mask, 'heat_index'] = 35.0
                 live_daily.loc[mask, 'drought_streak'] = 0
                 live_daily.loc[mask, 'lstm_prob'] = 0.5
+            
             # Lags/rolls (span hist + live)
             # Select only the columns needed for concatenation from historical data
-            hist_cols_to_concat = [c for c in recent_hist.columns if c in ['district', 'date', 'temp', 'precip_prob', 'mobility_proxy', 'heat_index', 'dynamic_flood', 'drought_risk', 'precip_sum_daily', 'drought_streak', 'lstm_prob']]
+            hist_cols_to_concat = [c for c in recent_hist.columns if c in ['district', 'date', 'temp', 'humidity', 'precip_prob', 'mobility_proxy', 'heat_index', 'dynamic_flood', 'drought_risk', 'precip_sum_daily', 'drought_streak', 'lstm_prob']]
             
             combined = pd.concat([recent_hist[hist_cols_to_concat], live_daily], ignore_index=True)
             combined = combined.sort_values(['district', 'date'])
             for col in ['temp', 'precip_prob', 'mobility_proxy', 'heat_index', 'dynamic_flood', 'drought_risk', 'precip_sum_daily']:
                 combined[f'{col}_lag1'] = combined.groupby('district')[col].shift(1)
-                combined[f'{col}_roll3'] = combined.groupby('district')[col].rolling(3, min_periods=1).mean().shift(1).reset_index(level=0, drop=True)
-            combined['drought_streak_lag1'] = combined.groupby('district')['drought_streak'].shift(1)
-            # Select live rows only
-            live_X = combined[combined['date'] >= pd.to_datetime(datetime.now().date())][feature_names].fillna(0) # FIX 1: Convert to Timestamp
-            live_probs = pipeline.predict_proba(live_X.values)[:, 1]
-            live_results = live_X.copy()
-            live_results['risk_prob'] = live_probs
-            live_results['alert'] = np.where(live_probs > 0.7, 'High (Ponchos)', np.where(live_probs > 0.4, 'Med (Hydrate)', 'Low'))
-            st.session_state.live_results = live_results
-            st.success("✅ Live predictions ready.")
-        if 'live_results' in st.session_state:
-            st.dataframe(st.session_state.live_results[['date', 'district', 'risk_prob', 'alert']])
-
-elif page == "Dashboard":
-    st.header("6. Interactive Dashboard (Live-Prioritized)")
-    if 'df_te' in st.session_state:
-        df_dash = st.session_state.df_te if 'live_results' not in st.session_state else st.session_state.live_results
-        # Plotly Trends
-        fig = make_subplots(rows=1, cols=1, subplot_titles=('Risk Trends (Back-Test or Live)'))
-        for dist in districts.keys():
-            dist_data = df_dash[df_dash['district'] == dist]
-            if not dist_data.empty:
-                fig.add_trace(go.Scatter(x=dist_data['date'], y=dist_data['risk_prob'], name=dist, line=dict(dash='solid')))
-        fig.update_layout(height=500, showlegend=True, title_text="Predicted Disruption Risk Over Time")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Folium Map
-        st.subheader("Geospatial Risk Map")
-        m = folium.Map(location=[25.5, 84.0], zoom_start=7)
-        avg_risk = df_dash.groupby('district')['risk_prob'].mean()
-        for dist, (lat, lon) in districts.items():
-            risk_np = avg_risk.get(dist, 0)
-            risk = float(risk_np) if not np.isnan(risk_np) else 0.0 # Fix: Explicit conversion
-            color = 'red' if risk > 0.5 else 'orange' if risk > 0.3 else 'green'
-            folium.CircleMarker([lat, lon], radius=risk*30, popup=f"{dist}: {risk:.2f}", color=color, fill=True, fill_color=color, fill_opacity=0.6).add_to(m)
-        st_folium(m, width=700, height=500)
-    else:
-        st.info("Run predictions first for dashboard data.")
-
-elif page == "Thermal Simulation (Cool-Cocoon)":
-    st.header("7. Bio-Thermal Simulation: Cool-Cocoon PCM Vest")
-    # Interactive Sliders for Winnable UX
-    col1, col2 = st.columns(2)
-    with col1:
-        mass_pcm = st.slider("PCM Mass (kg)", 0.1, 1.0, 0.6, help="Adjust for vest size")
-        t_ambient = st.slider("Ambient Temp (°C)", 35.0, 45.0, 40.0, help="Heatwave scenario")
-    with col2:
-        metabolic_rate = st.slider("Activity Level (W)", 50.0, 150.0, 116.0, help="Internal heat generation (Approximation of 2 METs).")
-        sim_hours = st.slider("Sim Duration (Hours)", 4, 8, 6)
-
-    # Run Sim (From Notebook, UX-Optimized)
-    TIME_STEPS = sim_hours * 60 + 1
-    time_array = np.linspace(0, sim_hours, TIME_STEPS)
-    # CRITICAL FIX: Set initial temp just ABOVE the melting point for immediate PCM activation
-    T_INITIAL = 32.5 
-    # Final Param Fixes
-    MASS_BODY, CP_BODY, AREA, H_COEFF = 10.0, 4.18, 1.0, 0.0475
-    T_MELT, LF_PCM = 32.0, 230
-    
-    METABOLIC_RATE_KJ_PER_MIN = (metabolic_rate * AREA) * (60 / 1000)
-    max_energy_to_melt = mass_pcm * LF_PCM
-    T_NO_PCM = np.full(TIME_STEPS, T_INITIAL) # Now starts at 32.5
-    T_WITH_PCM = np.full(TIME_STEPS, T_INITIAL) # Now starts at 32.5
-    total_energy_absorbed = 0.0
-    for i in range(1, TIME_STEPS):
-        dt_min = time_array[i] - time_array[i-1]
-        # No PCM
-        T_prev_no = T_NO_PCM[i-1]
-        Q_in_no = (H_COEFF * AREA * (t_ambient - T_prev_no) * dt_min) + (METABOLIC_RATE_KJ_PER_MIN * dt_min)
-        dT_no = Q_in_no / (MASS_BODY * CP_BODY)
-        T_NO_PCM[i] = T_prev_no + dT_no
-        # With PCM
-        T_prev_pcm = T_WITH_PCM[i-1]
-        Q_in_pcm = (H_COEFF * AREA * (t_ambient - T_prev_pcm) * dt_min) + (METABOLIC_RATE_KJ_PER_MIN * dt_min)
-        if T_prev_pcm >= T_MELT and total_energy_absorbed < max_energy_to_melt:
-            Q_latent = min(Q_in_pcm, max_energy_to_melt - total_energy_absorbed)
-            total_energy_absorbed += Q_latent
-            T_WITH_PCM[i] = T_MELT
-        else:
-            dT_sensible = Q_in_pcm / (MASS_BODY * CP_BODY)
-            T_WITH_PCM[i] = T_prev_pcm + dT_sensible
-    # Plot
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(time_array, T_NO_PCM, 'r-', label='No PCM (Unprotected)', linewidth=3)
-    ax.plot(time_array, T_WITH_PCM, 'b-', label='Cool-Cocoon (PCM-Cooled)', linewidth=3)
-    melt_time = time_array[np.argmax(T_WITH_PCM > T_MELT + 0.01)] if np.any(T_WITH_PCM > T_MELT + 0.01) else sim_hours
-    ax.axvspan(0, melt_time, color='green', alpha=0.1, label=f'Cooling Plateau: {melt_time:.1f} hrs')
-    ax.axhline(T_MELT, color='gray', linestyle='--', label=f'PCM Melt Temp ({T_MELT}°C)')
-    ax.set_title('Interactive Cool-Cocoon Thermal Simulation')
-    ax.set_xlabel('Time (Hours)')
-    ax.set_ylabel('Microclimate Temperature (°C)')
-    ax.legend()
-    st.pyplot(fig)
-    st.info(f"**Key Result**: Cooling sustains for {melt_time:.1f} hours below stress threshold.")
-
-elif page == "Policy Memo":
-    st.header("8. AI-Generated Policy Memo (Gemini-Powered)")
-    # Static content for guaranteed display (best practice for demos)
-    static_memo_content = """
-    ## DRAFT POLICY MEMORANDUM: CLIMATE-RESILIENT LEARNING CONTINUITY SYSTEM (CRLCS)
-    
-    **Executive Summary**  
-    Climate disruptions threaten 220 school days/year in Bihar/UP, creating an equity crisis. The CRLCS is an AI-to-Attire solution that uses a Stacked Ensemble model (0.85 AUC, 72% Recall) to provide a 72-hour advanced forecast, triggering the deployment of the Cool-Cocoon. This intervention is projected to save 8-9 learning days per year, protecting the most vulnerable students.
-    
-    **The Crisis**  
-    Heatwaves/floods cause 20% absenteeism, hitting rural girls hardest.
-    
-    **The Solution**  
-    XGBoost ensemble on weather/mobility data delivers 3-day forecasts.
-    
-    **Impact**  
-    Equity-focused: High alerts prioritize vulnerable districts.
-    
-    **Recommendation**  
-    Pilot 6-month deployment with SDMA integration.
-    
-    **Conclusion**  
-    Build resilience—protect futures.
-    """
-
-    if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        # Enhanced Prompt (From Notebook, UX: Editable)
-        default_prompt = """Draft a persuasive policy memo titled "Maximizing Learning Continuity: A Proposal for the Heat-Resilient Education System." Use metrics: AUC 0.85, Recall 0.72, F1 0.65. Top drivers: heat_index_roll3, drought_risk_roll3. Impact: 8 days saved/year. Audience: Bihar/UP Education Secretaries."""
-        
-        prompt = st.text_area("Edit Prompt", default_prompt, height=100)
-        
-        if st.button("Generate Memo"):
-            with st.spinner("Generating... (This relies on external API)"):
-                try:
-                    # Attempt the API call with a short timeout
-                    response = model.generate_content(prompt, timeout=20)
-                    st.markdown("### Generated Memo (Live API Output)")
-                    st.markdown(response.text)
-                    st.download_button("Download Memo (MD)", response.text, "policy_memo_live.md")
-                except Exception as e:
-                    # Fallback on API failure
-                    st.error(f"❌ API Generation Failed: {e}. Displaying Static Memo as final deliverable.")
-                    st.markdown("### Generated Memo (Static Fallback)")
-                    st.markdown(static_memo_content)
-                    
-    else:
-        st.warning("⚠️ Gemini API key not found. Displaying Static Memo.")
-        st.markdown("### Generated Memo (Static Fallback)")
-        st.markdown(static_memo_content)
+                combined[f'{col}_roll3'] = combined.groupby('
