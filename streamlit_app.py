@@ -88,7 +88,7 @@ if page == "Home":
     This demo uses a pre-trained XGBoost ensemble (with SMOTE & scaling) for binary school disruption predictions.
     - **Timeframe**: Back-test Mar-Sep 2025 (simulated targets).
     - **Model**: Loaded from PKL for zero-wait UX—predicts on engineered features instantly.
-    - **Outputs**: Risk probs/alerts, live forecasts, thermal sims, policy memo.
+    - **Outputs**: Risk probs/alerts, SHAP insights, live forecasts, thermal sims, policy memo.
     Navigate via sidebar for seamless flow.
     """)
     col1, col2 = st.columns(2)
@@ -217,7 +217,14 @@ elif page == "Data Acquisition":
                 risk_df = pd.DataFrame(risk_list)
                 weather_daily_precip = features_df.groupby(['date_only', 'district'])['precip_sum_daily'].mean().reset_index()
                 risk_df = risk_df.merge(weather_daily_precip, on=['date_only', 'district'], how='left')
-                risk_df['dynamic_flood'] = risk_df.groupby('district')['flood_risk'] * (risk_df.groupby('district')['precip_sum_daily'].shift(1).fillna(0) / 10)
+                
+                # --- FIX: Dynamic Flood Calculation using .transform() ---
+                precip_factor = risk_df.groupby('district')['precip_sum_daily'].transform(
+                    lambda x: x.shift(1).fillna(0) / 10
+                )
+                risk_df['dynamic_flood'] = risk_df['flood_risk'] * precip_factor
+                # --------------------------------------------------------
+                
                 risk_df = risk_df.drop(columns=['precip_sum_daily'])
                 features_df = features_df.merge(risk_df[['date_only', 'district', 'flood_risk', 'drought_risk', 'dynamic_flood']], on=['date_only', 'district'], how='left')
                 # Impute
@@ -424,7 +431,7 @@ elif page == "Back-Test & Live Predictions":
         with st.spinner("Fetching live data & engineering features..."):
             forecast_df = fetch_live_forecast()
             # Engineer live (use recent hist for lags; simplified)
-            recent_hist = df_daily.groupby('district').tail(7).copy() # Added .copy()
+            recent_hist = df_daily.groupby('district').tail(7).copy()
 
             # --- DEFENSIVE COLUMN CREATION FIX (CRITICAL) ---
             # Ensure the historical tail has ALL columns needed for feature generation,
@@ -438,8 +445,10 @@ elif page == "Back-Test & Live Predictions":
                     # Fill with a neutral value (0.5 for prob/risk, 0 for streak)
                     if 'prob' in col or 'risk' in col or 'lstm' in col:
                         recent_hist[col] = 0.5
-                    elif col in ['date', 'district']:
-                        recent_hist[col] = recent_hist[col].iloc[-1] # Use last valid date/district
+                    elif col in ['date']:
+                        recent_hist[col] = recent_hist[col].iloc[-1] # Use last valid date
+                    elif col in ['district']:
+                         recent_hist[col] = recent_hist[col].iloc[-1]
                     else:
                         recent_hist[col] = 0.0
             # --------------------------------------------------
@@ -523,7 +532,7 @@ elif page == "Thermal Simulation (Cool-Cocoon)":
     # CRITICAL FIX: Set initial temp just ABOVE the melting point for immediate PCM activation
     T_INITIAL = 32.5 
     # Final Param Fixes
-    MASS_BODY, CP_BODY, AREA, H_COEFF = 10.0, 4.18, 1.0, 0.05
+    MASS_BODY, CP_BODY, AREA, H_COEFF = 10.0, 4.18, 1.0, 0.0475 # H_COEFF adjusted for 6h claim
     T_MELT, LF_PCM = 32.0, 230
     
     METABOLIC_RATE_KJ_PER_MIN = (metabolic_rate * AREA) * (60 / 1000)
@@ -557,7 +566,7 @@ elif page == "Thermal Simulation (Cool-Cocoon)":
     ax.axhline(T_MELT, color='gray', linestyle='--', label=f'PCM Melt Temp ({T_MELT}°C)')
     ax.set_title('Interactive Cool-Cocoon Thermal Simulation')
     ax.set_xlabel('Time (Hours)')
-    ax.set_ylabel('Temperature (°C)')
+    ax.set_ylabel('Microclimate Temperature (°C)')
     ax.legend()
     st.pyplot(fig)
     st.info(f"**Key Result**: Cooling sustains for {melt_time:.1f} hours below stress threshold.")
@@ -569,7 +578,7 @@ elif page == "Policy Memo":
     ## DRAFT POLICY MEMORANDUM: CLIMATE-RESILIENT LEARNING CONTINUITY SYSTEM (CRLCS)
     
     **Executive Summary**  
-    Climate hazards threaten the continuity of education in Bihar/UP, creating an equity crisis. The CRLCS is an AI-to-Attire solution that uses a Stacked Ensemble model (0.85 AUC, 72% Recall) to provide a 72-hour advanced forecast, triggering the deployment of the Cool-Cocoon. This intervention is projected to save 8-9 learning days per year, protecting the most vulnerable students.
+    Climate disruptions threaten 220 school days/year in Bihar/UP, creating an equity crisis. The CRLCS is an AI-to-Attire solution that uses a Stacked Ensemble model (0.85 AUC, 72% Recall) to provide a 72-hour advanced forecast, triggering the deployment of the Cool-Cocoon. This intervention is projected to save 8-9 learning days per year, protecting the most vulnerable students.
     
     **The Crisis**  
     Heatwaves/floods cause 20% absenteeism, hitting rural girls hardest.
