@@ -314,17 +314,27 @@ elif page == "Model Loading & Eval":
         st.info("PKL includes stacking if enabled in notebook. Recall: 67% catches high-impact events.")
 
 elif page == "Interpretability (SHAP)":
-    st.header("4. SHAP Interpretability (Instant on Loaded Model)")
-    if pipeline is None or 'X' not in st.session_state:
-        st.warning("Load model & features first.")
-        st.stop()
-    X = st.session_state.X
-    explainer = shap.TreeExplainer(pipeline.named_steps['xgb'])
-    with st.spinner("Computing SHAP..."):
-        shap_values = explainer.shap_values(X)
-    shap_positive = shap_values[1] if isinstance(shap_values, list) else shap_values
+st.header("4. SHAP Interpretability (Instant on Loaded Model)")
+if pipeline is None or 'X' not in st.session_state:
+    st.warning("Load model & features first.")
+    st.stop()
+X = st.session_state.X
 
-    # Global Beeswarm (UX: Interactive Plotly conversion)
+try:
+    # Robust init: Use booster to avoid pipeline/param issues
+    xgb_model = pipeline.named_steps['xgb']
+    booster = xgb_model.get_booster()  # Extract raw booster
+    explainer = shap.TreeExplainer(booster)
+    st.success("✅ SHAP Explainer initialized (booster mode).")
+except Exception as e:
+    st.error(f"❌ SHAP init failed: {e}. Try regenerating PKL in Colab.")
+    st.stop()
+
+with st.spinner("Computing SHAP values..."):
+    shap_values = explainer.shap_values(X)
+shap_positive = shap_values[1] if isinstance(shap_values, list) else shap_values
+
+# Global Beeswarm (UX: Interactive Plotly conversion)
     st.subheader("Global Feature Importance (Beeswarm)")
     shap.summary_plot(shap_positive, X, feature_names=feature_names, show=False)
     st.pyplot(plt.gcf())
