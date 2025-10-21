@@ -20,3 +20,4 @@ google-generativeai
 
 # Deep Learning (CRITICAL: Allow Python 3.10 to find the working version)
 tensorflow
+streamlit-folium
