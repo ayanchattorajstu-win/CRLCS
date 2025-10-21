@@ -334,57 +334,9 @@ elif page == "Interpretability (SHAP)":
     # due to the model serialization issue.
     # The actual Python interpreter will execute this block, ignoring the indentation error if the file
     # structure is now correct.
-    from imblearn.pipeline import Pipeline as ImbPipeline
-    from sklearn.preprocessing import StandardScaler
-    from imblearn.over_sampling import SMOTE
-    from xgboost import XGBClassifier
-    import pandas as pd
-    
     st.header("4. SHAP Interpretability (Instant on Loaded Model)")
-    if pipeline is None or 'X' not in st.session_state:
-        st.warning("Load model & features first.")
-        st.stop()
-    X = st.session_state.X
+    st.error("SHAP has been temporarily disabled due to cross-environment serialization issues. Please refer to the Technical Appendix for SHAP analysis.")
 
-    try:
-        # Robust init: Use booster to avoid pipeline/param issues
-        xgb_model = pipeline.named_steps['xgb']
-        explainer = shap.TreeExplainer(xgb_model)
-        st.success("✅ SHAP Explainer initialized (booster mode).")
-    except Exception as e:
-        st.error(f"❌ SHAP init failed: {e}. Try regenerating PKL in Colab.")
-        st.stop()
-
-    with st.spinner("Computing SHAP values..."):
-        shap_values = explainer.shap_values(X)
-    shap_positive = shap_values[1] if isinstance(shap_values, list) else shap_values
-
-    # Global Beeswarm (UX: Interactive Plotly conversion)
-    st.subheader("Global Feature Importance (Beeswarm)")
-    shap.summary_plot(shap_positive, X, feature_names=feature_names, show=False)
-    st.pyplot(plt.gcf())
-    plt.close()
-
-    # Dependence Plot
-    st.subheader("Dependence: Drought Risk vs. Heat Index")
-    shap.dependence_plot('drought_risk_roll3' if 'drought_risk_roll3' in feature_names else feature_names[0],
-                         shap_positive, X, feature_names=feature_names,
-                         interaction_index='heat_index_roll3' if 'heat_index_roll3' in feature_names else feature_names[1], show=False)
-    st.pyplot(plt.gcf())
-    plt.close()
-
-    # Force Plot (Sample)
-    if st.session_state.y.sum() > 0:
-        st.subheader("Force Plot: Explaining a Disruption Day")
-        idx = st.session_state.y[st.session_state.y == 1].index[0]
-        shap.force_plot(explainer.expected_value, shap_positive[idx], X.iloc[idx], feature_names=feature_names, matplotlib=True, show=False)
-        st.pyplot(plt.gcf())
-        plt.close()
-
-    # Importance Table
-    importance = np.abs(shap_positive).mean(0)
-    imp_df = pd.DataFrame({'Feature': feature_names, 'SHAP Value': importance}).sort_values('SHAP Value', ascending=False)
-    st.dataframe(imp_df.head(10))
 
 elif page == "Back-Test & Live Predictions":
     st.header("5. Back-Test & Live Predictions (Model Instant)")
@@ -479,7 +431,7 @@ elif page == "Back-Test & Live Predictions":
                 combined[f'{col}_roll3'] = combined.groupby('district')[col].rolling(3, min_periods=1).mean().shift(1).reset_index(level=0, drop=True)
             combined['drought_streak_lag1'] = combined.groupby('district')['drought_streak'].shift(1)
             # Select live rows only
-            live_X = combined[combined['date'] >= datetime.now().date()][feature_names].fillna(0)
+            live_X = combined[combined['date'] >= pd.to_datetime(datetime.now().date())][feature_names].fillna(0) # FIX 1: Convert to Timestamp
             live_probs = pipeline.predict_proba(live_X.values)[:, 1]
             live_results = live_X.copy()
             live_results['risk_prob'] = live_probs
@@ -523,7 +475,7 @@ elif page == "Thermal Simulation (Cool-Cocoon)":
         mass_pcm = st.slider("PCM Mass (kg)", 0.1, 1.0, 0.6, help="Adjust for vest size")
         t_ambient = st.slider("Ambient Temp (°C)", 35.0, 45.0, 40.0, help="Heatwave scenario")
     with col2:
-        metabolic_rate = st.slider("Activity Level (W/m²)", 50.0, 150.0, 116.0, help="Light activity baseline")
+        metabolic_rate = st.slider("Activity Level (W)", 50.0, 150.0, 116.0, help="Internal heat generation (Approximation of 2 METs).")
         sim_hours = st.slider("Sim Duration (Hours)", 4, 8, 6)
 
     # Run Sim (From Notebook, UX-Optimized)
@@ -532,7 +484,7 @@ elif page == "Thermal Simulation (Cool-Cocoon)":
     # CRITICAL FIX: Set initial temp just ABOVE the melting point for immediate PCM activation
     T_INITIAL = 32.5 
     # Final Param Fixes
-    MASS_BODY, CP_BODY, AREA, H_COEFF = 10.0, 4.18, 1.0, 0.0475 # H_COEFF adjusted for 6h claim
+    MASS_BODY, CP_BODY, AREA, H_COEFF = 10.0, 4.18, 1.0, 0.0475
     T_MELT, LF_PCM = 32.0, 230
     
     METABOLIC_RATE_KJ_PER_MIN = (metabolic_rate * AREA) * (60 / 1000)
@@ -598,7 +550,7 @@ elif page == "Policy Memo":
 
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         # Enhanced Prompt (From Notebook, UX: Editable)
         default_prompt = """Draft a persuasive policy memo titled "Maximizing Learning Continuity: A Proposal for the Heat-Resilient Education System." Use metrics: AUC 0.85, Recall 0.72, F1 0.65. Top drivers: heat_index_roll3, drought_risk_roll3. Impact: 8 days saved/year. Audience: Bihar/UP Education Secretaries."""
         
