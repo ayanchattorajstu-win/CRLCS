@@ -314,11 +314,11 @@ elif page == "Model Loading & Eval":
         st.info("PKL includes stacking if enabled in notebook. Recall: 67% catches high-impact events.")
 
 elif page == "Interpretability (SHAP)":
-st.header("4. SHAP Interpretability (Instant on Loaded Model)")
-if pipeline is None or 'X' not in st.session_state:
-    st.warning("Load model & features first.")
-    st.stop()
-X = st.session_state.X
+    st.header("4. SHAP Interpretability (Instant on Loaded Model)")
+    if pipeline is None or 'X' not in st.session_state:
+        st.warning("Load model & features first.")
+        st.stop()
+    X = st.session_state.X
 
 try:
     # Robust init: Use booster to avoid pipeline/param issues
