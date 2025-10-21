@@ -527,9 +527,14 @@ elif page == "Thermal Simulation (Cool-Cocoon)":
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(time_array_hr, T_NO_PCM, 'r-', label='No PCM (Unprotected)', linewidth=3)
     ax.plot(time_array_hr, T_WITH_PCM, 'b-', label='Cool-Cocoon (PCM-Cooled)', linewidth=3)
-    # Find approximate melt_time in hours (when starts rising after plateau)
-    post_melt_indices = np.where(np.diff(T_WITH_PCM > T_MELT + 0.01) > 0)[0]
-    melt_time = time_array_hr[post_melt_indices[0] + 1] if len(post_melt_indices) > 0 else sim_hours
+    # Fixed melt_time calculation
+    above_threshold = T_WITH_PCM > T_MELT + 0.01
+    slice_argmax = np.argmax(above_threshold[1:])
+    rise_idx = slice_argmax + 1
+    if len(above_threshold) > rise_idx and above_threshold[rise_idx]:
+        melt_time = time_array_hr[rise_idx]
+    else:
+        melt_time = sim_hours
     ax.axvspan(0, melt_time, color='green', alpha=0.1, label=f'Cooling Plateau: {melt_time:.1f} hrs')
     ax.axhline(T_MELT, color='gray', linestyle='--', label=f'PCM Melt Temp ({T_MELT}°C)')
     ax.set_title('Interactive Cool-Cocoon Thermal Simulation')
